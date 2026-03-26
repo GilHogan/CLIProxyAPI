@@ -433,6 +433,38 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 	if claims := extractCodexIDTokenClaims(auth); claims != nil {
 		entry["id_token"] = claims
 	}
+
+	if len(auth.ModelStates) > 0 {
+		modelStatesMap := make(map[string]interface{})
+		for modelName, state := range auth.ModelStates {
+			if state == nil {
+				continue
+			}
+			stateMap := map[string]interface{}{
+				"status":         state.Status,
+				"unavailable":    state.Unavailable,
+			}
+			if state.StatusMessage != "" {
+				stateMap["status_message"] = state.StatusMessage
+			}
+			if state.LastError != nil {
+				stateMap["last_error"] = map[string]interface{}{
+					"message": state.LastError.Message,
+					"code":    state.LastError.Code,
+					"type":    state.LastError.Type,
+					"param":   state.LastError.Param,
+				}
+			}
+			if !state.NextRetryAfter.IsZero() {
+				stateMap["next_retry_after"] = state.NextRetryAfter
+			}
+			modelStatesMap[modelName] = stateMap
+		}
+		if len(modelStatesMap) > 0 {
+			entry["model_states"] = modelStatesMap
+		}
+	}
+
 	// Expose priority from Attributes (set by synthesizer from JSON "priority" field).
 	// Fall back to Metadata for auths registered via UploadAuthFile (no synthesizer).
 	if p := strings.TrimSpace(authAttribute(auth, "priority")); p != "" {
@@ -1194,6 +1226,80 @@ func (h *Handler) PatchAuthFileFields(c *gin.Context) {
 	if !changed {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "no fields to update"})
 		return
+	}
+
+	targetAuth.UpdatedAt = time.Now()
+
+	if _, err := h.authManager.Update(ctx, targetAuth); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to update auth: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// ResetAuthCooldown clears the cooldown error state and retry time for an auth.
+func (h *Handler) ResetAuthCooldown(c *gin.Context) {
+	if h.authManager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "core auth manager unavailable"})
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// Find auth by name or ID
+	var targetAuth *coreauth.Auth
+	if auth, ok := h.authManager.GetByID(name); ok {
+		targetAuth = auth
+	} else {
+		auths := h.authManager.List()
+		for _, auth := range auths {
+			if auth.FileName == name {
+				targetAuth = auth
+				break
+			}
+		}
+	}
+
+	if targetAuth == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "auth file not found"})
+		return
+	}
+
+	// Reset cooldown
+	targetAuth.NextRetryAfter = time.Time{}
+	targetAuth.Quota.Exceeded = false
+	targetAuth.Quota.NextRecoverAt = time.Time{}
+	targetAuth.Unavailable = false
+
+	if targetAuth.StatusMessage != "" && (strings.Contains(strings.ToLower(targetAuth.StatusMessage), "exhausted") || strings.Contains(strings.ToLower(targetAuth.StatusMessage), "too many requests")) {
+		targetAuth.StatusMessage = ""
+	}
+
+	for _, state := range targetAuth.ModelStates {
+		if state != nil {
+			state.NextRetryAfter = time.Time{}
+			state.Quota.Exceeded = false
+			state.Quota.NextRecoverAt = time.Time{}
+			state.Unavailable = false
+			if state.StatusMessage != "" && (strings.Contains(strings.ToLower(state.StatusMessage), "exhausted") || strings.Contains(strings.ToLower(state.StatusMessage), "too many requests")) {
+				state.StatusMessage = ""
+			}
+		}
 	}
 
 	targetAuth.UpdatedAt = time.Now()

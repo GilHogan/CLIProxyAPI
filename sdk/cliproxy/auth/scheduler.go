@@ -293,7 +293,7 @@ func (s *authScheduler) pickMixed(ctx context.Context, providers []string, model
 	}
 
 	cursorKey := strings.Join(normalized, ",") + ":" + modelKey
-	var flatCandidates []*scheduledAuth
+	var flatAll []*scheduledAuth
 	for _, providerKey := range normalized {
 		providerState := s.providers[providerKey]
 		if providerState == nil {
@@ -303,36 +303,50 @@ func (s *authScheduler) pickMixed(ctx context.Context, providers []string, model
 		if shard == nil {
 			continue
 		}
-		bucket := shard.readyByPriority[bestPriority]
-		if bucket == nil {
-			continue
-		}
-		view := &bucket.all
-		for _, entry := range view.flat {
-			if predicate != nil && !predicate(entry) {
-				continue
+		// Gather ALL auths for this priority, not just the ready ones, to maintain stable indexing.
+		for _, entry := range shard.allByPriority[bestPriority] {
+			if entry != nil && entry.auth != nil {
+				flatAll = append(flatAll, entry)
 			}
-			flatCandidates = append(flatCandidates, entry)
 		}
 	}
 
-	if len(flatCandidates) == 0 {
+	if len(flatAll) == 0 {
 		return nil, "", s.mixedUnavailableErrorLocked(normalized, model, tried)
 	}
 
-	sort.SliceStable(flatCandidates, func(i, j int) bool {
-		return flatCandidates[i].auth.ID < flatCandidates[j].auth.ID
+	sort.SliceStable(flatAll, func(i, j int) bool {
+		return flatAll[i].auth.ID < flatAll[j].auth.ID
 	})
 
-	start := s.mixedCursors[cursorKey] % len(flatCandidates)
-	for offset := 0; offset < len(flatCandidates); offset++ {
-		index := (start + offset) % len(flatCandidates)
-		picked := flatCandidates[index]
-		if picked != nil && picked.auth != nil {
-			s.mixedCursors[cursorKey] = index + 1
-			return picked.auth, picked.meta.providerKey, nil
+	start := s.mixedCursors[cursorKey] % len(flatAll)
+	for offset := 0; offset < len(flatAll); offset++ {
+		index := (start + offset) % len(flatAll)
+		entry := flatAll[index]
+		
+		// Check if it's healthy/ready
+		if entry.isCoolingDown(now) {
+			continue
+		}
+		if predicate != nil && !predicate(entry) {
+			continue
+		}
+		
+		s.mixedCursors[cursorKey] = index + 1
+		return entry.auth, entry.meta.providerKey, nil
+	}
+
+	// Fallback to FillFirst on ready views if strict ordering fails (e.g. all target priority cooling down but another priority might be ready)
+	for _, providerKey := range normalized {
+		providerState := s.providers[providerKey]
+		if providerState == nil { continue }
+		shard := providerState.ensureModelLocked(modelKey, now)
+		if shard == nil { continue }
+		if picked := shard.pickReadyAtPriorityLocked(false, bestPriority, schedulerStrategyFillFirst, predicate); picked != nil {
+			return picked, providerKey, nil
 		}
 	}
+
 	return nil, "", s.mixedUnavailableErrorLocked(normalized, model, tried)
 }
 
