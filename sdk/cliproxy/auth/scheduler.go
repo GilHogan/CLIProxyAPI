@@ -304,8 +304,8 @@ func (s *authScheduler) pickMixed(ctx context.Context, providers []string, model
 			continue
 		}
 		// Gather ALL auths for this priority, not just the ready ones, to maintain stable indexing.
-		for _, entry := range shard.allByPriority[bestPriority] {
-			if entry != nil && entry.auth != nil {
+		for _, entry := range shard.entries {
+			if entry != nil && entry.auth != nil && entry.meta.priority == bestPriority {
 				flatAll = append(flatAll, entry)
 			}
 		}
@@ -324,8 +324,8 @@ func (s *authScheduler) pickMixed(ctx context.Context, providers []string, model
 		index := (start + offset) % len(flatAll)
 		entry := flatAll[index]
 		
-		// Check if it's healthy/ready
-		if entry.isCoolingDown(now) {
+		// Check if it's healthy/ready. If it's blocked, cooldown, or disabled, we skip it but advance the cursor.
+		if entry.state != scheduledStateReady {
 			continue
 		}
 		if predicate != nil && !predicate(entry) {
