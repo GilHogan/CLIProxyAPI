@@ -293,23 +293,45 @@ func (s *authScheduler) pickMixed(ctx context.Context, providers []string, model
 	}
 
 	cursorKey := strings.Join(normalized, ",") + ":" + modelKey
-	start := 0
-	if len(normalized) > 0 {
-		start = s.mixedCursors[cursorKey] % len(normalized)
-	}
-	for offset := 0; offset < len(normalized); offset++ {
-		providerIndex := (start + offset) % len(normalized)
-		providerKey := normalized[providerIndex]
-		shard := candidateShards[providerIndex]
+	var flatCandidates []*scheduledAuth
+	for _, providerKey := range normalized {
+		providerState := s.providers[providerKey]
+		if providerState == nil {
+			continue
+		}
+		shard := providerState.ensureModelLocked(modelKey, now)
 		if shard == nil {
 			continue
 		}
-		picked := shard.pickReadyAtPriorityLocked(false, bestPriority, schedulerStrategyRoundRobin, predicate)
-		if picked == nil {
+		bucket := shard.readyByPriority[bestPriority]
+		if bucket == nil {
 			continue
 		}
-		s.mixedCursors[cursorKey] = providerIndex + 1
-		return picked, providerKey, nil
+		view := &bucket.all
+		for _, entry := range view.flat {
+			if predicate != nil && !predicate(entry) {
+				continue
+			}
+			flatCandidates = append(flatCandidates, entry)
+		}
+	}
+
+	if len(flatCandidates) == 0 {
+		return nil, "", s.mixedUnavailableErrorLocked(normalized, model, tried)
+	}
+
+	sort.SliceStable(flatCandidates, func(i, j int) bool {
+		return flatCandidates[i].auth.ID < flatCandidates[j].auth.ID
+	})
+
+	start := s.mixedCursors[cursorKey] % len(flatCandidates)
+	for offset := 0; offset < len(flatCandidates); offset++ {
+		index := (start + offset) % len(flatCandidates)
+		picked := flatCandidates[index]
+		if picked != nil && picked.auth != nil {
+			s.mixedCursors[cursorKey] = index + 1
+			return picked.auth, picked.meta.providerKey, nil
+		}
 	}
 	return nil, "", s.mixedUnavailableErrorLocked(normalized, model, tried)
 }
@@ -815,30 +837,7 @@ func buildReadyBucket(entries []*scheduledAuth) *readyBucket {
 
 // buildReadyView creates either a flat view or a grouped parent/child view for rotation.
 func buildReadyView(entries []*scheduledAuth) readyView {
-	view := readyView{flat: append([]*scheduledAuth(nil), entries...)}
-	if len(entries) == 0 {
-		return view
-	}
-	groups := make(map[string][]*scheduledAuth)
-	for _, entry := range entries {
-		if entry == nil || entry.meta == nil || entry.meta.virtualParent == "" {
-			return view
-		}
-		groups[entry.meta.virtualParent] = append(groups[entry.meta.virtualParent], entry)
-	}
-	if len(groups) <= 1 {
-		return view
-	}
-	view.children = make(map[string]*childBucket, len(groups))
-	view.parentOrder = make([]string, 0, len(groups))
-	for parent := range groups {
-		view.parentOrder = append(view.parentOrder, parent)
-	}
-	sort.Strings(view.parentOrder)
-	for _, parent := range view.parentOrder {
-		view.children[parent] = &childBucket{items: append([]*scheduledAuth(nil), groups[parent]...)}
-	}
-	return view
+	return readyView{flat: append([]*scheduledAuth(nil), entries...)}
 }
 
 // pickFirst returns the first ready entry that satisfies predicate without advancing cursors.
