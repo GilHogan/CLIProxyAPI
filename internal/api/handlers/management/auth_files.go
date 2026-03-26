@@ -449,10 +449,10 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 			}
 			if state.LastError != nil {
 				stateMap["last_error"] = map[string]interface{}{
-					"message": state.LastError.Message,
-					"code":    state.LastError.Code,
-					"type":    state.LastError.Type,
-					"param":   state.LastError.Param,
+					"message":     state.LastError.Message,
+					"code":        state.LastError.Code,
+					"retryable":   state.LastError.Retryable,
+					"http_status": state.LastError.HTTPStatus,
 				}
 			}
 			if !state.NextRetryAfter.IsZero() {
