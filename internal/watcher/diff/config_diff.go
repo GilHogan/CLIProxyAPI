@@ -60,6 +60,12 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldCfg.MaxRetryInterval != newCfg.MaxRetryInterval {
 		changes = append(changes, fmt.Sprintf("max-retry-interval: %d -> %d", oldCfg.MaxRetryInterval, newCfg.MaxRetryInterval))
 	}
+	if oldCfg.QuotaBackoffBase != newCfg.QuotaBackoffBase {
+		changes = append(changes, fmt.Sprintf("quota-backoff-base: %d -> %d", oldCfg.QuotaBackoffBase, newCfg.QuotaBackoffBase))
+	}
+	if oldCfg.QuotaBackoffMax != newCfg.QuotaBackoffMax {
+		changes = append(changes, fmt.Sprintf("quota-backoff-max: %d -> %d", oldCfg.QuotaBackoffMax, newCfg.QuotaBackoffMax))
+	}
 	if oldCfg.ProxyURL != newCfg.ProxyURL {
 		changes = append(changes, fmt.Sprintf("proxy-url: %s -> %s", formatProxyURL(oldCfg.ProxyURL), formatProxyURL(newCfg.ProxyURL)))
 	}

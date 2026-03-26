@@ -419,6 +419,10 @@ func main() {
 	}
 	usage.SetStatisticsEnabled(cfg.UsageStatisticsEnabled)
 	coreauth.SetQuotaCooldownDisabled(cfg.DisableCooling)
+	coreauth.SetQuotaBackoffConfig(
+		time.Duration(cfg.QuotaBackoffBase)*time.Second,
+		time.Duration(cfg.QuotaBackoffMax)*time.Second,
+	)
 
 	if err = logging.ConfigureLogOutput(cfg); err != nil {
 		log.Errorf("failed to configure log output: %v", err)

@@ -261,6 +261,10 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 	managementasset.SetCurrentConfig(cfg)
 	auth.SetQuotaCooldownDisabled(cfg.DisableCooling)
+	auth.SetQuotaBackoffConfig(
+		time.Duration(cfg.QuotaBackoffBase)*time.Second,
+		time.Duration(cfg.QuotaBackoffMax)*time.Second,
+	)
 	// Initialize management handler
 	s.mgmt = managementHandlers.NewHandler(cfg, configFilePath, authManager)
 	if optionState.localPassword != "" {
@@ -913,6 +917,13 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 
 	if oldCfg == nil || oldCfg.DisableCooling != cfg.DisableCooling {
 		auth.SetQuotaCooldownDisabled(cfg.DisableCooling)
+	}
+
+	if oldCfg == nil || oldCfg.QuotaBackoffBase != cfg.QuotaBackoffBase || oldCfg.QuotaBackoffMax != cfg.QuotaBackoffMax {
+		auth.SetQuotaBackoffConfig(
+			time.Duration(cfg.QuotaBackoffBase)*time.Second,
+			time.Duration(cfg.QuotaBackoffMax)*time.Second,
+		)
 	}
 
 	if s.handlers != nil && s.handlers.AuthManager != nil {

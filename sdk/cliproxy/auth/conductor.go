@@ -58,7 +58,7 @@ type RefreshEvaluator interface {
 	ShouldRefresh(now time.Time, auth *Auth) bool
 }
 
-const (
+var (
 	refreshCheckInterval  = 5 * time.Second
 	refreshMaxConcurrency = 16
 	refreshPendingBackoff = time.Minute
@@ -66,6 +66,16 @@ const (
 	quotaBackoffBase      = time.Second
 	quotaBackoffMax       = 30 * time.Minute
 )
+
+// SetQuotaBackoffConfig updates the base and maximum cooldown durations for quota errors.
+func SetQuotaBackoffConfig(base, max time.Duration) {
+	if base > 0 {
+		quotaBackoffBase = base
+	}
+	if max > 0 {
+		quotaBackoffMax = max
+	}
+}
 
 var quotaCooldownDisabled atomic.Bool
 

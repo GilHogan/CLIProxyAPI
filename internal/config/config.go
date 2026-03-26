@@ -76,6 +76,11 @@ type Config struct {
 	// MaxRetryInterval defines the maximum wait time in seconds before retrying a cooled-down credential.
 	MaxRetryInterval int `yaml:"max-retry-interval" json:"max-retry-interval"`
 
+	// QuotaBackoffBase defines the base cooldown time in seconds for a 429 (Quota Exceeded) error.
+	QuotaBackoffBase int `yaml:"quota-backoff-base" json:"quota-backoff-base"`
+	// QuotaBackoffMax defines the maximum cumulative cooldown time in seconds for repeated quota errors.
+	QuotaBackoffMax int `yaml:"quota-backoff-max" json:"quota-backoff-max"`
+
 	// QuotaExceeded defines the behavior when a quota is exceeded.
 	QuotaExceeded QuotaExceeded `yaml:"quota-exceeded" json:"quota-exceeded"`
 
